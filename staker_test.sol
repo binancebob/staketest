@@ -81,7 +81,7 @@ contract FunnyMoneyStaker is ERC20, Ownable, IERC721Receiver {
         require(lockedPresidents[msg.sender][_tokenID] = true, "This President is not locked");
         totalStaked -= 1;
         timeUnstaked[msg.sender][_tokenID] = block.timestamp;
-        isStaked[msg.sender] = false;
+        lockedPresidents[msg.sender][_tokenID] = false; 
         amountLocked[msg.sender] -= 1;
         presidentContract.safeTransferFrom(address(this), msg.sender, _tokenID);
     }
