@@ -1,113 +1,251 @@
+
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "openzeppelin-solidity/contracts/token/ERC20/ERC20.sol";
-import "openzeppelin-solidity/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
 
-// Funny money has an infinite supply tho only 10,000 max can be created per day if all Washington mints are staked. (unlikely)
-//   Contract starts and sets start date to a unix time 
-//   When someone clicks stake it adds them to the staking and updates their token balance with +1 every 24 hours 
+contract uSTD is ERC20Burnable, Ownable {
+    /*
+    $uSTD backed by the presidents 
+*/
 
-// FUNCTIONS NEEDED FROM NFT CONTRACT: 
-// contract calls approve token iD ?? Think this is needed
-// contract safetransfers to the locker 
+    using SafeMath for uint256;
 
-// contract safetransfers to the unlocker if they locked that NFT
+    uint256 public MAX_WALLET_STAKED = 10;
+    uint256 public EMISSIONS_RATE = 11574070000000;
+    uint256 public CLAIM_END_TIME = 1641013200;
 
-interface PresidentsInterface {
-    function totalSupply() external view returns (uint256);
-    function approve(address spender, uint256 value) external returns (bool);
-    function safeTransferFrom(address from, address to, uint256 tokenId) external;
-}
+    address nullAddress = 0x0000000000000000000000000000000000000000;
 
-    
-contract FunnyMoneyStaker is ERC20, Ownable, IERC721Receiver {
-    
-    address PresidentsInterfaceAddress = 0xE6D2ad0AE40E2F40f1a47EF1aFC9DbE174a00034; 
-    // ^ The address of the Washie contract on Ethereum
-    PresidentsInterface presidentContract = PresidentsInterface(PresidentsInterfaceAddress);
-    // Now `presidentsContract` is pointing to the washie contract
+    address public washieAddress;
+    address public abeAddress;
+    address public hamiltonAddress;
+    address public jacksonAddress;
+    address public grantAddress;
+    address public bennyAddress;
 
-   
-    uint256 public day = 86400;
-    uint256 public start;
-    
-    uint256 public currentSupply;
-    uint256 public totalStaked;
-    
-    address[] public stakeholders;
-    
-    mapping (address => bool) public isStaked;
-    mapping (address => mapping (uint256 => uint256)) public timeStaked;
-    mapping (address => mapping (uint256 => uint256)) public timeUnstaked;
-    mapping (address => uint256) public amountLocked;
-    
-    mapping (address => uint256) public internalBalance;
-    
-    mapping (address => mapping (uint256 => bool)) private lockedPresidents;
-    
-    constructor() public ERC20("FunnyMoney", "BUCK") {
-        start = block.timestamp;
+    //Mapping of president to timestamp
+    mapping(uint256 => uint256) internal tokenIdToTimeStamp;
+
+    //Mapping of president to staker
+    mapping(uint256 => address) internal tokenIdToStaker;
+
+    //Mapping of staker to president
+    mapping(address => uint256[]) internal stakerToTokenIds;
+
+    constructor() ERC20("Unstables", "uSTD") {}
+
+    function setWashieAddress(address _washieAddress) public onlyOwner {
+        washieAddress = _washieAddress;
+        return;
     }
     
-    /**
-     * Always returns `IERC721Receiver.onERC721Received.selector`.
-     */
-    function onERC721Received(address, address, uint256, bytes memory) public virtual override returns (bytes4) {
-        return this.onERC721Received.selector;
+    function setAbeAddress(address _abeAddress) public onlyOwner {
+        abeAddress = _abeAddress;
+        return;
     }
-    
-    function test() public view returns (uint) {
-        return presidentContract.totalSupply();
-    }
-    
-    function totalSupply() public view override returns (uint256) {
-        return currentSupply;
-    }
-    
 
-    // token owner must approve first directly from token contract then can use stake().     
-    function stake(uint256 _tokenID) public {
-        
-        require(lockedPresidents[msg.sender][_tokenID] = false, "You have already locked this President");
-        totalStaked += 1;
-        timeStaked[msg.sender][_tokenID] = block.timestamp;
-        lockedPresidents[msg.sender][_tokenID] = true; 
-        amountLocked[msg.sender] += 1;
-        presidentContract.safeTransferFrom(msg.sender, address(this), _tokenID);
+    function setHamiltonAddress(address _hamiltonAddress) public onlyOwner {
+        hamiltonAddress = _hamiltonAddress;
+        return;
     }
     
-    function unstake(uint256 _tokenID) public {
-        require(lockedPresidents[msg.sender][_tokenID] = true, "This President is not locked");
-        totalStaked -= 1;
-        timeUnstaked[msg.sender][_tokenID] = block.timestamp;
-        lockedPresidents[msg.sender][_tokenID] = false; 
-        amountLocked[msg.sender] -= 1;
-        presidentContract.safeTransferFrom(address(this), msg.sender, _tokenID);
+    function setJacksonAddress(address _jacksonAddress) public onlyOwner {
+        jacksonAddress = _jacksonAddress;
+        return;
     }
     
+    function setGrantAddress(address _grantAddress) public onlyOwner {
+        grantAddress = _grantAddress;
+        return;
+    }
     
+    function setBennyAddress(address _bennyAddress) public onlyOwner {
+        bennyAddress = _bennyAddress;
+        return;
+    }
     
-    function outstandingrewardsOf(address account) public view returns(uint256) {
-        // require(timeStaked[account] > 0, "You have no Washingtons staked or have just staked this block");
-        uint256 a =  amountLocked[msg.sender];
-        uint256 total = 0;
-        for (uint i = 0; i < a; i++) {
-            uint256 secondsBetween = ( block.timestamp - timeStaked[account][i]);
-            total += secondsBetween;
+    function getTokensStaked(address staker)
+        public
+        view
+        returns (uint256[] memory)
+    {
+        return stakerToTokenIds[staker];
+    }
+
+    function remove(address staker, uint256 index) internal {
+        if (index >= stakerToTokenIds[staker].length) return;
+
+        for (uint256 i = index; i < stakerToTokenIds[staker].length - 1; i++) {
+            stakerToTokenIds[staker][i] = stakerToTokenIds[staker][i + 1];
         }
-        return total;
+        stakerToTokenIds[staker].pop();
     }
-    
-    
-    function withdrawRewards() public {
-        uint256 rewards = outstandingrewardsOf(msg.sender);
-        
-        uint256 b =  amountLocked[msg.sender];
-        for (uint i = 0; i < b; i++) {
-            timeStaked[msg.sender][i] = block.timestamp;
+
+    function removeTokenIdFromStaker(address staker, uint256 tokenId) internal {
+        for (uint256 i = 0; i < stakerToTokenIds[staker].length; i++) {
+            if (stakerToTokenIds[staker][i] == tokenId) {
+                //This is the tokenId to remove;
+                remove(staker, i);
+            }
         }
-        _mint(msg.sender, rewards); 
-        currentSupply += rewards;
+    }
+
+    function stakeByIds(uint256[] memory tokenIds) public {
+        require(
+            stakerToTokenIds[msg.sender].length + tokenIds.length <=
+                MAX_WALLET_STAKED,
+            "Must have less than 31 presidents staked!"
+        );
+        
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            require(
+                IERC721(washieAddress).ownerOf(tokenIds[i]) == msg.sender 
+                &&
+                    tokenIdToStaker[tokenIds[i]] == nullAddress,
+                "Token must be stakable by you!"
+            );
+
+            IERC721(washieAddress).transferFrom(
+                msg.sender,
+                address(this),
+                tokenIds[i]
+            );
+
+            stakerToTokenIds[msg.sender].push(tokenIds[i]);
+
+            tokenIdToTimeStamp[tokenIds[i]] = block.timestamp;
+            tokenIdToStaker[tokenIds[i]] = msg.sender;
+        }
+    }
+
+    function unstakeAll() public {
+        require(
+            stakerToTokenIds[msg.sender].length > 0,
+            "Must have at least one token staked!"
+        );
+        uint256 totalRewards = 0;
+
+        for (uint256 i = stakerToTokenIds[msg.sender].length; i > 0; i--) {
+            uint256 tokenId = stakerToTokenIds[msg.sender][i - 1];
+
+            IERC721(washieAddress).transferFrom(
+                address(this),
+                msg.sender,
+                tokenId
+            );
+
+            totalRewards =
+                totalRewards +
+                ((block.timestamp - tokenIdToTimeStamp[tokenId]) *
+                    EMISSIONS_RATE);
+
+            removeTokenIdFromStaker(msg.sender, tokenId);
+
+            tokenIdToStaker[tokenId] = nullAddress;
+        }
+
+        _mint(msg.sender, totalRewards);
+    }
+
+    function unstakeByIds(uint256[] memory tokenIds) public {
+        uint256 totalRewards = 0;
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            require(
+                tokenIdToStaker[tokenIds[i]] == msg.sender,
+                "Message Sender was not original staker!"
+            );
+
+            IERC721(washieAddress).transferFrom(
+                address(this),
+                msg.sender,
+                tokenIds[i]
+            );
+
+            totalRewards =
+                totalRewards +
+                ((block.timestamp - tokenIdToTimeStamp[tokenIds[i]]) *
+                    EMISSIONS_RATE);
+
+            removeTokenIdFromStaker(msg.sender, tokenIds[i]);
+
+            tokenIdToStaker[tokenIds[i]] = nullAddress;
+        }
+
+        _mint(msg.sender, totalRewards);
+    }
+
+    function claimByTokenId(uint256 tokenId) public {
+        require(
+            tokenIdToStaker[tokenId] == msg.sender,
+            "Token is not claimable by you!"
+        );
+        require(block.timestamp < CLAIM_END_TIME, "Claim period is over!");
+
+        _mint(
+            msg.sender,
+            ((block.timestamp - tokenIdToTimeStamp[tokenId]) * EMISSIONS_RATE)
+        );
+
+        tokenIdToTimeStamp[tokenId] = block.timestamp;
+    }
+
+    function claimAll() public {
+        require(block.timestamp < CLAIM_END_TIME, "Claim period is over!");
+        uint256[] memory tokenIds = stakerToTokenIds[msg.sender];
+        uint256 totalRewards = 0;
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            require(
+                tokenIdToStaker[tokenIds[i]] == msg.sender,
+                "Token is not claimable by you!"
+            );
+
+            totalRewards =
+                totalRewards +
+                ((block.timestamp - tokenIdToTimeStamp[tokenIds[i]]) *
+                    EMISSIONS_RATE);
+
+            tokenIdToTimeStamp[tokenIds[i]] = block.timestamp;
+        }
+
+        _mint(msg.sender, totalRewards);
+    }
+
+    function getAllRewards(address staker) public view returns (uint256) {
+        uint256[] memory tokenIds = stakerToTokenIds[staker];
+        uint256 totalRewards = 0;
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            totalRewards =
+                totalRewards +
+                ((block.timestamp - tokenIdToTimeStamp[tokenIds[i]]) *
+                    EMISSIONS_RATE);
+        }
+
+        return totalRewards;
+    }
+
+    function getRewardsByTokenId(uint256 tokenId)
+        public
+        view
+        returns (uint256)
+    {
+        require(
+            tokenIdToStaker[tokenId] != nullAddress,
+            "Token is not staked!"
+        );
+
+        uint256 secondsStaked = block.timestamp - tokenIdToTimeStamp[tokenId];
+
+        return secondsStaked * EMISSIONS_RATE;
+    }
+
+    function getStaker(uint256 tokenId) public view returns (address) {
+        return tokenIdToStaker[tokenId];
     }
 }
